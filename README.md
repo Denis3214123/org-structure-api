@@ -1,59 +1,76 @@
-# Organizational structure API
+# API организационной структуры
 
-Test assignment implementation: REST API for departments (tree) and employees on **FastAPI**, **SQLAlchemy 2**, **PostgreSQL**, **Alembic**, **Docker Compose**.
+Реализация тестового задания: REST API для отделов (дерево) и сотрудников на **FastAPI**, **SQLAlchemy 2**, **PostgreSQL**, **Alembic**, **Docker Compose**.
 
 ## Run with Docker
 
-```bash
+```bash сборка и запуск всех сервисов
 docker compose up --build
 ```
 
-API: `http://localhost:8000`  
-OpenAPI: `http://localhost:8000/docs`  
-Health: `http://localhost:8000/health`
+API: `http://localhost:8000` —  Базовый URL API
+OpenAPI: `http://localhost:8000/docs` —  интерактивная документация API  
+Health: `http://localhost:8000/health` — проверка работоспособности сервиса. Используется для мониторинга
 
-On startup the API container runs `alembic upgrade head`, then `uvicorn`.
+При запуске контейнер API выполняет команду `alembic upgrade head`, а затем `uvicorn`.
 
-## Local development
+##  Локальная разработка (без Docker)
 
-1. Python 3.12+, PostgreSQL 16 (or use only the `db` service from Compose).
-2. Copy `.env.example` to `.env` and point `DATABASE_URL` at your database.
-3. Install dependencies: `pip install -r requirements.txt`
-4. Migrations: `alembic upgrade head`
-5. Run: `uvicorn app.main:app --reload`
+1. Python 3.12+, PostgreSQL 16 (или используйте только службу `db` из Compose).
+2. Скопируйте `.env.example` в `.env` и укажите `DATABASE_URL` на вашу базу данных.
+3. Установите зависимости: `pip install -r requirements.txt`
+4. Миграции: `alembic upgrade head`
+5. Запустите: `uvicorn app.main:app --reload`
 
-## Tests
+## Тесты
 
 ```bash
 pip install -r requirements.txt
 pytest
 ```
 
-Inside Docker (after `docker compose up --build`):
+Внутри Docker (после выполнения команды `docker compose up --build`):
 
 ```bash
 docker compose exec api pytest -v
 ```
 
-Tests use in-memory SQLite with foreign keys enabled (PostgreSQL remains the production target).
+В тестах используется SQLite, хранящийся в оперативной памяти, с включенными внешними ключами (PostgreSQL остается целевой платформой для производственной среды).
 
-## API overview
+## Обзор API
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/departments/` | Create department (`name`, optional `parent_id`) |
-| `POST` | `/departments/{id}/employees/` | Create employee in department |
-| `GET` | `/departments/{id}` | Department details, employees, nested children (`depth` 1–5, `include_employees`) |
-| `PATCH` | `/departments/{id}` | Update `name` and/or `parent_id` |
-| `DELETE` | `/departments/{id}` | `mode=cascade` or `mode=reassign` + `reassign_to_department_id` |
+`POST /departments/` — добавляем отдел. Указываем название и родителя (если есть). 
 
-Department names are unique among siblings (case-insensitive). Moving a department under its own subtree returns `409`. Reassign delete moves employees and child departments to the target department before removing the node.
+`POST /departments/{id}/employees/` — добавляем сотрудника в конкретный отдел.
 
-## Project layout
+`GET /departments/{id}` — смотрим отдел: его данные, список сотрудников и всё поддерево дочерних отделов. Можно регулировать глубину (depth от 1 до 5) и убрать сотрудников, если не нужны.
 
-- `app/main.py` — FastAPI app
-- `app/models/` — SQLAlchemy models
-- `app/schemas/` — Pydantic request/response models
-- `app/services/department_service.py` — business rules
-- `app/routers/departments.py` — HTTP layer
-- `alembic/versions/` — migrations
+`PATCH /departments/{id}` — меняем название отдела или переносим его в другой родительский отдел.
+
+`DELETE /departments/{id}` — удаляем отдел. Два варианта:
+
+`cascade` — всё подчистую: сам отдел, всех сотрудников, все дочерние отделы.
+
+`reassign` — перед удалением сотрудников и детей перекидываем в другой отдел (обязательно указываем reassign_to_department_id).
+
+## Что добавил
+
+Названия отделов не повторяются в пределах одного родителя. То есть у одного начальника не может быть двух отделов с именем «Бэкенд». Регистр не учитывается — «backend» и «Backend» считаются одинаковыми.
+Нельзя сделать отдел родителем самого себя. И вообще нельзя создать циклическую ссылку, когда отдел пытаешься перенести внутрь своего же поддерева — вернётся ошибка 409.
+При удалении с reassign все дочерние отделы и сотрудники переезжают в указанный целевой отдел, и только после этого исходный удаляется.
+
+## Организация
+
+`app/main.py` — входная точка, собирает роутеры.
+
+`app/models/` — описание таблиц в БД через SQLAlchemy.
+
+`app/schemas/` — Pydantic-схемы для того, что приходит в запросах и уходит в ответах.
+
+`app/services/department_service.py` — вся бизнес-логика: проверка уникальности имён, поиск циклов, каскадное удаление, перенос сотрудников.
+
+`app/routers/departments.py` — обработчики HTTP-запросов.
+
+`alembic/versions/` — миграции, которые создают и обновляют схему БД.
+
+Технически всё завернуто в Docker и работает с PostgreSQL. Тесты запускаются одной командой и зелёные.
